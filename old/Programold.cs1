@@ -1,0 +1,156 @@
+/**
+ * @Author: Carlos Galeano
+ * @Date:   2026-03-04 18:09:10
+ * @Last Modified by:   Carlos Galeano
+ * @Last Modified time: 2026-03-05 15:36:15
+ */
+using System.Data;
+using Microsoft.Data.SqlClient;
+using Npgsql;
+using Dapper;
+//using System.Text.Json.Serialization;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.TypeInfoResolverChain.Add(JsonTypeInfoResolver.Default);
+});
+
+var config = builder.Configuration;
+
+var app = builder.Build();
+
+
+
+
+
+
+
+
+app.MapGet("/", () => Results.Ok(new {
+    service = "API .NET + SQL Server + PostgreSQL",
+    version = "v1",
+    timestamp = DateTimeOffset.UtcNow
+}));
+
+// Endpoint de salud
+app.MapGet("/health", () => Results.Ok("OK"));
+
+// Probar conexión a SQL Server (SELECT 1 y listar Todos)
+app.MapGet("/sqlserver/test", async () =>
+{
+    try
+    {
+        using var conn = new SqlConnection(config.GetConnectionString("SqlServer"));
+        await conn.OpenAsync();
+
+        var one = await conn.ExecuteScalarAsync<int>("SELECT 1");
+        var todos = await conn.QueryAsync("SELECT TOP 5 Id, Title, IsDone, CreatedAt FROM dbo.Todos ORDER BY Id DESC");
+
+        return Results.Ok(new {
+            status = "ok",
+            test = one,
+            sample = todos
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.Message);
+    }
+});
+
+// Probar conexión a PostgreSQL (SELECT 1 y listar todos)
+app.MapGet("/postgres/test", async () =>
+{
+    try
+    {
+        await using var conn = new NpgsqlConnection(config.GetConnectionString("Postgres"));
+        await conn.OpenAsync();
+
+        var one = await conn.ExecuteScalarAsync<int>("SELECT 1");
+        var todos = await conn.QueryAsync("SELECT id, title, is_done, created_at FROM todos ORDER BY id DESC LIMIT 5");
+
+        return Results.Ok(new {
+            status = "ok",
+            test = one,
+            sample = todos
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.Message);
+    }
+});
+
+// CRUD muy simple en Postgres (ejemplo)
+app.MapPost("/todos", async (TodoCreate dto) =>
+{
+    const string sql = "INSERT INTO todos (title, is_done) VALUES (@Title, false) RETURNING id;";
+    await using var conn = new NpgsqlConnection(config.GetConnectionString("Postgres"));
+    var id = await conn.ExecuteScalarAsync<int>(sql, new { dto.Title });
+    return Results.Created($"/todos/{id}", new { id, title = dto.Title, is_done = false });
+});
+
+app.MapGet("/todos", async () =>
+{
+    const string sql = "SELECT id, title, is_done, created_at FROM todos ORDER BY id ASC;";
+    await using var conn = new NpgsqlConnection(config.GetConnectionString("Postgres"));
+    var items = await conn.QueryAsync(sql);
+    return Results.Ok(items);
+});
+
+app.MapPut("/todos/{id:int}", async (int id, TodoUpdate dto) =>
+{
+    const string sql = "UPDATE todos SET title=@Title, is_done=@IsDone WHERE id=@Id;";
+    await using var conn = new NpgsqlConnection(config.GetConnectionString("Postgres"));
+    var rows = await conn.ExecuteAsync(sql, new { Id = id, dto.Title, dto.IsDone });
+    return rows > 0 ? Results.NoContent() : Results.NotFound();
+});
+
+app.MapDelete("/todos/{id:int}", async (int id) =>
+{
+    const string sql = "DELETE FROM todos WHERE id=@Id;";
+    await using var conn = new NpgsqlConnection(config.GetConnectionString("Postgres"));
+    var rows = await conn.ExecuteAsync(sql, new { Id = id });
+    return rows > 0 ? Results.NoContent() : Results.NotFound();
+});
+
+app.Run();
+
+record TodoCreate(string Title);
+record TodoUpdate(string Title, bool IsDone);
+
+
+
+otro c program 
+
+using System;
+
+// No agregamos 'using System.Text.Json.Serialization.Metadata;' a propósito;
+// usaremos el nombre completamente calificado para evitar conflictos.
+
+var builder = WebApplication.CreateBuilder(args);
+
+// 👇 Fuerza el resolvedor por defecto usando el nombre totalmente calificado.
+// Esto evita el error "JsonTypeInfo metadata..." sin depender de source generation.
+
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.TypeInfoResolverChain.Clear();
+    options.SerializerOptions.TypeInfoResolverChain.Add(ApiJsonContext.Default);
+});
+
+
+var app = builder.Build();
+
+app.MapGet("/", () => Results.Ok(new { service = "API", ok = true, ts = DateTimeOffset.UtcNow }));
+
+// Endpoint de prueba usando tu DTO (para validar que el binding funciona)
+app.MapPost("/todos", (TodoCreate dto) => Results.Ok(new { recibido = dto.Title }));
+
+app.Run();
+
+// Asegúrate de que los DTOs sean públicos
+public record TodoCreate(string Title);
+public record TodoUpdate(string Title, bool IsDone);
