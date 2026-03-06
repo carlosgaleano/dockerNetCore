@@ -1,18 +1,25 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.1" />
-    <PackageReference Include="Npgsql" Version="8.0.3" />
-    <PackageReference Include="Dapper" Version="2.1.24" />   
-    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.*" />
-    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="8.*" />
+  
+<ItemGroup>
+  <PackageReference Include="Microsoft.Data.SqlClient" Version="5.2.1" />
+  <PackageReference Include="Npgsql" Version="8.0.3" />
+  <PackageReference Include="Dapper" Version="2.1.24" />
 
-  </ItemGroup>
+  <!-- SqlKata: sólo estos dos -->
+  <PackageReference Include="SqlKata" Version="4.0.1" />
+  <PackageReference Include="SqlKata.Execution" Version="4.0.1" />
+
+  <!-- Swagger/OpenAPI: puedes fijar versiones concretas si prefieres builds reproducibles -->
+  <PackageReference Include="Swashbuckle.AspNetCore" Version="10.1.4" />
+  <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.*" />
+</ItemGroup>
+
 
 </Project>
