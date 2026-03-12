@@ -2,7 +2,7 @@
  * @Author: Carlos Galeano
  * @Date:   2026-03-04 18:09:10
  * @Last Modified by:   Carlos Galeano
- * @Last Modified time: 2026-03-06 18:08:02
+ * @Last Modified time: 2026-03-11 17:15:56
  */
 using Demo;
 using Api.Models;
@@ -14,6 +14,17 @@ using SqlKata.Compilers;
 using SqlKata.Execution;
 using Npgsql;
 using Dapper;
+
+
+using System.Text;
+using System.Security.Claims;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.IdentityModel.JsonWebTokens;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using System.IdentityModel.Tokens.Jwt;
+
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -72,9 +83,34 @@ app.MapPost("/postgres/test", async (IConfiguration config, PagingRequest req) =
 
 app.MapGet("/sqlserver/test", async (IConfiguration config) =>
 {
+
+
     try
     {
         using var conn = new SqlConnection(config.GetConnectionString("SqlServer"));
+        await conn.OpenAsync();
+
+        var one = await conn.ExecuteScalarAsync<int>("SELECT 1");
+        var todos = await conn.QueryAsync("SELECT * FROM tracking_info_3  ORDER BY 1 DESC");
+
+        return Results.Ok(new {
+            status = "ok",
+            test = one,
+            sample = todos
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.Message);
+    }
+});
+
+
+app.MapGet("/sqlserver2/test", async (IConfiguration config) =>
+{
+    try
+    {
+        using var conn = new SqlConnection(config.GetConnectionString("SqlServer2"));
         await conn.OpenAsync();
 
         var one = await conn.ExecuteScalarAsync<int>("SELECT 1");
@@ -84,6 +120,36 @@ app.MapGet("/sqlserver/test", async (IConfiguration config) =>
             status = "ok",
             test = one,
             sample = todos
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.Message);
+    }
+});
+
+
+
+
+app.MapPost("/sqlserver2/test", async (IConfiguration config, PagingRequest req) =>
+{
+     var limit  = (req.Limit is > 0 and <= 1000) ? req.Limit : 50;
+     var page   = (req.Page  > 0) ? req.Page : 1;
+     var offset = (page - 1) * limit;
+
+    try
+    {
+        using var conn = new SqlConnection(config.GetConnectionString("SqlServer"));
+        await conn.OpenAsync();
+
+          var total = await conn.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM tracking_info_3");
+          var data  = await conn.QueryAsync("SELECT * FROM tracking_info_3  ORDER BY id_despacho OFFSET @Offset ROWS    FETCH NEXT @Limit ROWS ONLY",
+            new { Limit = limit, Offset = offset });
+
+         return Results.Ok(new {
+            page, limit, total,
+            totalPages = (int)Math.Ceiling(total / (double)limit),
+            data
         });
     }
     catch (Exception ex)
@@ -132,5 +198,79 @@ app.MapGet("/anon", () =>
     // Esto funciona gracias al fallback (DefaultJsonTypeInfoResolver)
     Results.Ok(new { id = "123", estado = "ok", fecha = DateTimeOffset.UtcNow })
 );
+
+
+
+app.MapPost("/register", async (UserRegisterDto dto, IConfiguration config) =>
+{
+    using var conn = new NpgsqlConnection(config.GetConnectionString("Postgres"));
+
+    var hashed = BCrypt.Net.BCrypt.HashPassword(dto.Password);
+
+    var sql = "INSERT INTO users2 (username, password_hash) VALUES (@username, @hash)";
+    await conn.ExecuteAsync(sql, new { username = dto.Username, hash = hashed });
+
+    return Results.Ok(new { message = "Usuario registrado correctamente" });
+});
+
+app.MapPost("/login", async (UserLoginDto dto, IConfiguration config) =>
+{
+    using var conn = new NpgsqlConnection(config.GetConnectionString("Postgres"));
+
+    // 1. Buscar usuario en la base de datos
+    const string sql = "SELECT id, username, password_hash FROM users2 WHERE username = @Username";
+    var user = await conn.QueryFirstOrDefaultAsync<User>(sql, new { dto.Username });
+
+    if (user is null)
+    {
+        // Usuario no existe → 401 Unauthorized
+        return Results.Unauthorized();
+    }
+
+    // 2. Verificar contraseña
+    bool passwordValid = BCrypt.Net.BCrypt.Verify(dto.Password, user.Password_Hash);
+
+    if (!passwordValid)
+    {
+        // Password incorrecto → 401 Unauthorized
+        return Results.Unauthorized();
+    }
+
+    // 3. Crear token JWT
+    var tokenHandler = new JwtSecurityTokenHandler();
+    var key = Encoding.UTF8.GetBytes(config["Jwt:Key"]!);
+
+    var tokenDescriptor = new SecurityTokenDescriptor
+    {
+        Subject = new ClaimsIdentity(new Claim[]
+        {
+            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new Claim(ClaimTypes.Name, user.Username)
+        }),
+        Expires = DateTime.UtcNow.AddMinutes(int.Parse(config["Jwt:ExpiresMinutes"]!)),
+        Issuer = config["Jwt:Issuer"],
+        Audience = config["Jwt:Audience"],
+        SigningCredentials = new SigningCredentials(
+            new SymmetricSecurityKey(key),
+            SecurityAlgorithms.HmacSha256Signature
+        )
+    };
+
+    var token = tokenHandler.CreateToken(tokenDescriptor);
+    var jwt = tokenHandler.WriteToken(token);
+
+    // 4. Responder
+    return Results.Ok(new { token = jwt });
+});
+
+
+
+app.MapGet("/secure-data", [Authorize] () =>
+{
+    return Results.Ok("Accediste correctamente.");
+});
+
+
+
 
 app.Run();
