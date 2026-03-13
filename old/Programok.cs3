@@ -1,0 +1,302 @@
+/**
+ * @Author: Carlos Galeano
+ * @Date:   2026-03-04 18:09:10
+ * @Last Modified by:   Carlos Galeano
+ * @Last Modified time: 2026-03-13 12:47:50
+ */
+using Demo;
+using Api.Models;
+using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
+using Microsoft.Data.SqlClient;
+using SqlKata;
+using SqlKata.Compilers;
+using SqlKata.Execution;
+using Npgsql;
+using Dapper;
+
+
+using System.Text;
+using System.Security.Claims;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.IdentityModel.JsonWebTokens;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using System.IdentityModel.Tokens.Jwt;
+
+
+
+
+
+var builder = WebApplication.CreateBuilder(args);
+
+
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+
+
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.TypeInfoResolverChain.Clear();
+    options.SerializerOptions.TypeInfoResolverChain.Add(ApiJsonContext.Default);
+    options.SerializerOptions.TypeInfoResolverChain.Add(new DefaultJsonTypeInfoResolver());
+});
+
+
+
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = builder.Configuration["Jwt:Issuer"],
+            ValidAudience = builder.Configuration["Jwt:Audience"],
+            IssuerSigningKey = new SymmetricSecurityKey(
+                Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!)
+            )
+        };
+    });
+
+
+builder.Services.AddAuthorization(); 
+
+var app = builder.Build();
+var config = builder.Configuration;
+
+app.UseAuthentication();
+app.UseAuthorization();
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+
+app.MapGet("/", () => Results.Ok(new {
+    service = "API .NET + SQL Server + PostgreSQL",
+    version = "v1",
+    timestamp = DateTimeOffset.UtcNow
+}));
+
+
+// POST: body = { "limit": 100, "page": 2 }
+app.MapPost("/postgres/test", async (IConfiguration config, PagingRequest req) =>
+{
+    var limit  = (req.Limit is > 0 and <= 1000) ? req.Limit : 50;
+    var page   = (req.Page  > 0) ? req.Page : 1;
+    var offset = (page - 1) * limit;
+
+    await using var conn = new NpgsqlConnection(config.GetConnectionString("Postgres"));
+    await conn.OpenAsync();
+
+    var total = await conn.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM tracking_info_3");
+    var data  = await conn.QueryAsync(
+        @"SELECT * FROM tracking_info_3 ORDER BY id_despacho LIMIT @Limit OFFSET @Offset",
+        new { Limit = limit, Offset = offset });
+
+    return Results.Ok(new {
+        page, limit, total,
+        totalPages = (int)Math.Ceiling(total / (double)limit),
+        data
+    });
+});
+
+app.MapGet("/sqlserver/test", async (IConfiguration config) =>
+{
+
+
+    try
+    {
+        using var conn = new SqlConnection(config.GetConnectionString("SqlServer"));
+        await conn.OpenAsync();
+
+        var one = await conn.ExecuteScalarAsync<int>("SELECT 1");
+        var todos = await conn.QueryAsync("SELECT * FROM tracking_info_3  ORDER BY 1 DESC");
+
+        return Results.Ok(new {
+            status = "ok",
+            test = one,
+            sample = todos
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.Message);
+    }
+});
+
+
+app.MapGet("/sqlserver2/test", async (IConfiguration config) =>
+{
+    try
+    {
+        using var conn = new SqlConnection(config.GetConnectionString("SqlServer2"));
+        await conn.OpenAsync();
+
+        var one = await conn.ExecuteScalarAsync<int>("SELECT 1");
+        var todos = await conn.QueryAsync("SELECT * FROM vw_get_data_tracking_new  ORDER BY 1 DESC");
+
+        return Results.Ok(new {
+            status = "ok",
+            test = one,
+            sample = todos
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.Message);
+    }
+});
+
+
+
+
+app.MapPost("/sqlserver2/test", async (IConfiguration config, PagingRequest req) =>
+{
+     var limit  = (req.Limit is > 0 and <= 1000) ? req.Limit : 50;
+     var page   = (req.Page  > 0) ? req.Page : 1;
+     var offset = (page - 1) * limit;
+
+    try
+    {
+        using var conn = new SqlConnection(config.GetConnectionString("SqlServer"));
+        await conn.OpenAsync();
+
+          var total = await conn.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM tracking_info_3");
+          var data  = await conn.QueryAsync("SELECT * FROM tracking_info_3  ORDER BY id_despacho OFFSET @Offset ROWS    FETCH NEXT @Limit ROWS ONLY",
+            new { Limit = limit, Offset = offset });
+
+         return Results.Ok(new {
+            page, limit, total,
+            totalPages = (int)Math.Ceiling(total / (double)limit),
+            data
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.Message);
+    }
+});
+
+// Probar conexión a PostgreSQL (SELECT 1 y listar todos)
+app.MapGet("/postgres/test", async () =>
+{
+    try
+    {
+        await using var conn = new NpgsqlConnection(config.GetConnectionString("Postgres"));
+        await conn.OpenAsync();
+
+        var one = await conn.ExecuteScalarAsync<int>("SELECT 1");
+        //var todos = await conn.QueryAsync("SELECT  * from tracking_info_3 ti  limit 10000");
+        
+        var compiler = new PostgresCompiler();
+
+        var db = new QueryFactory(conn, compiler);
+
+        var todos = await db.Query("tracking_info_3")
+                            .Select("id_despacho","ode","numero_guia","cliente","direccion","fecha_creacion","fecha_inicio","transporte","observacion","comentario","fecha_estado","estado","estado_penultimo","fecha_penultimo_estado","estado_penultimo_1","fecha_ante_penultimo_estado","quarto_estado","fecha_quarto_estado","quinto_estado","fecha_quinto_estado","sexto_estado","fecha_sexto_estado","septimo_estado","fecha_septimo_estado","octavo_estado","fecha_octavo_estado","peso")
+                            .Limit(50)
+                            .GetAsync();
+
+        return Results.Ok(new {
+            status = "ok",
+            test = one,
+            sample = todos
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(ex.Message);
+    }
+});
+
+app.MapGet("/dto", () =>
+    Results.Ok(new MiRespuesta("123", "ok", DateTimeOffset.UtcNow))
+);
+
+app.MapGet("/anon", () =>
+    // Esto funciona gracias al fallback (DefaultJsonTypeInfoResolver)
+    Results.Ok(new { id = "123", estado = "ok", fecha = DateTimeOffset.UtcNow })
+);
+
+
+
+app.MapPost("/register", async (UserRegisterDto dto, IConfiguration config) =>
+{
+    using var conn = new NpgsqlConnection(config.GetConnectionString("Postgres"));
+
+    var hashed = BCrypt.Net.BCrypt.HashPassword(dto.Password);
+
+    var sql = "INSERT INTO users2 (username, password_hash) VALUES (@username, @hash)";
+    await conn.ExecuteAsync(sql, new { username = dto.Username, hash = hashed });
+
+    return Results.Ok(new { message = "Usuario registrado correctamente" });
+});
+
+app.MapPost("/login", async (UserLoginDto dto, IConfiguration config) =>
+{
+    using var conn = new NpgsqlConnection(config.GetConnectionString("Postgres"));
+
+    // 1. Buscar usuario en la base de datos
+    const string sql = "SELECT id, username, password_hash FROM users2 WHERE username = @Username";
+    var user = await conn.QueryFirstOrDefaultAsync<User>(sql, new { dto.Username });
+
+    if (user is null)
+    {
+        // Usuario no existe → 401 Unauthorized
+        return Results.Unauthorized();
+    }
+
+    // 2. Verificar contraseña
+    bool passwordValid = BCrypt.Net.BCrypt.Verify(dto.Password, user.Password_Hash);
+
+    if (!passwordValid)
+    {
+        // Password incorrecto → 401 Unauthorized
+        return Results.Unauthorized();
+    }
+
+    // 3. Crear token JWT
+    var tokenHandler = new JwtSecurityTokenHandler();
+    var key = Encoding.UTF8.GetBytes(config["Jwt:Key"]!);
+
+    var tokenDescriptor = new SecurityTokenDescriptor
+    {
+        Subject = new ClaimsIdentity(new Claim[]
+        {
+            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new Claim(ClaimTypes.Name, user.Username)
+        }),
+        Expires = DateTime.UtcNow.AddMinutes(int.Parse(config["Jwt:ExpiresMinutes"]!)),
+        Issuer = config["Jwt:Issuer"],
+        Audience = config["Jwt:Audience"],
+        SigningCredentials = new SigningCredentials(
+            new SymmetricSecurityKey(key),
+            SecurityAlgorithms.HmacSha256Signature
+        )
+    };
+
+    var token = tokenHandler.CreateToken(tokenDescriptor);
+    var jwt = tokenHandler.WriteToken(token);
+
+    // 4. Responder
+    return Results.Ok(new { token = jwt });
+});
+
+
+
+app.MapGet("/secure-data", [Authorize] () =>
+{
+    return Results.Ok("Accediste correctamente.");
+});
+
+
+
+
+app.Run();

@@ -2,8 +2,10 @@
  * @Author: Carlos Galeano
  * @Date:   2026-03-04 18:09:10
  * @Last Modified by:   Carlos Galeano
- * @Last Modified time: 2026-03-11 17:15:56
+ * @Last Modified time: 2026-03-13 14:52:35
  */
+
+//using Microsoft.OpenApi.Models; 
 using Demo;
 using Api.Models;
 using System.Text.Json.Serialization;
@@ -26,6 +28,8 @@ using System.IdentityModel.Tokens.Jwt;
 
 
 
+
+
 var builder = WebApplication.CreateBuilder(args);
 
 
@@ -41,9 +45,64 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.TypeInfoResolverChain.Add(new DefaultJsonTypeInfoResolver());
 });
 
+
+
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = builder.Configuration["Jwt:Issuer"],
+            ValidAudience = builder.Configuration["Jwt:Audience"],
+            IssuerSigningKey = new SymmetricSecurityKey(
+                Encoding.UTF8.GetBytes(builder.Configuration["Jwt:Key"]!)
+            )
+        };
+    });
+
+
+builder.Services.AddAuthorization(); 
+
+builder.Services.AddEndpointsApiExplorer();
+
+
+
+/* builder.Services.AddSwaggerGen(options =>
+{
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        In = ParameterLocation.Header,
+        Description = "Token JWT: Bearer {token}"
+    });
+
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            new string[]{}
+        }
+    });
+}); */
+
+
 var app = builder.Build();
 var config = builder.Configuration;
 
+app.UseAuthentication();
+app.UseAuthorization();
 
 if (app.Environment.IsDevelopment())
 {

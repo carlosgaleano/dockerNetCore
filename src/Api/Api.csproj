@@ -18,8 +18,9 @@
 
   <!-- Swagger/OpenAPI: puedes fijar versiones concretas si prefieres builds reproducibles -->
   <PackageReference Include="Swashbuckle.AspNetCore" Version="10.1.4" />
-  <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.*" />
-
+  <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.5" />
+  <PackageReference Include="Microsoft.OpenApi" Version="2.4.1" /> 
+ <!--  <PackageReference Include="Microsoft.OpenApi" Version="1.6.0" /> -->
   
 
  <!-- JWT para net10 -->
